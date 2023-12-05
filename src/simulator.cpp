@@ -180,10 +180,10 @@ void NSsimulator::visualizeParticles(std::vector<Eigen::MatrixXf> &particles_ove
 
             if (r < R_) {
                 int darkness = (int) (0.5*255.0 * pow(r / R_, 2));
-                cv::circle(image, cv::Point(x_img, y_img), 2, cv::Scalar(darkness, darkness, darkness), -1);
+                cv::circle(image, cv::Point(x_img, y_img), 0, cv::Scalar(darkness, darkness, darkness), -1);
             }
             else {
-                cv::circle(image, cv::Point(x_img, y_img), 2, cv::Scalar(255, 255, 255), -1);
+                cv::circle(image, cv::Point(x_img, y_img), 0, cv::Scalar(255, 255, 255), -1);
             }
         }
 
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
     float dr = 0.01;
     float dt = 0.00001;
     int fps = 30;
-    int num_particles = 10000;
+    int num_particles = 200000;
 
     std::cout << "Solving Navier Stokes..." << std::endl;
     auto start = std::chrono::system_clock::now();
