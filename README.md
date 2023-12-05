@@ -11,5 +11,5 @@ make
 ./particle_simulation
 ```
 
-![Alt Text](./data/example.gif)
+![Alt Text](./data/ex.gif)
 
