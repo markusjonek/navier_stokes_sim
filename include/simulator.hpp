@@ -41,7 +41,12 @@ public:
     /**
      * Solves the Navier-Stokes equation for the rotating drum.
     */
-    void solveNavierStokes();
+    void solveNavierStokesEuler();
+
+    /**
+     * Solves the Navier-Stokes equation for the rotating drum.
+    */
+    void solveNavierStokesRK4();
 
     /**
      * Simulates particles in the rotating drum.
@@ -59,7 +64,8 @@ public:
      * @param fps: The number of frames per second to simulate.
     */
     void visualizeParticles(const std::vector<Eigen::MatrixXf>& particles_over_time, 
-                            const int fps);
+                            const int fps,
+                            const int particle_size=0);
 
 private:
     float U_;
@@ -70,6 +76,10 @@ private:
     float t_max_;
     float dr_;
     float dt_;
+
+    float inv_2dr_;
+    float inv_dr2_;
+
     int steps_to_R_;
 
     Eigen::MatrixXf r_space_;
@@ -92,7 +102,7 @@ private:
      * @param t: The time to calculate the angular velocity at.
      * @return The angular velocity of the drum at time t.
     */
-    float omega(const float t);
+    inline float omega(const float t);
 
     /**
      * Calculates the time derivative of the azimuthal velocity.
@@ -102,17 +112,17 @@ private:
      * @param d2udr2: The second radial derivative of the azimuthal velocity.
      * @return The time derivative of the azimuthal velocity.
     */
-    float dudt(const float r, 
-                const float u, 
-                const float dudr, 
-                const float d2udr2);
+    inline float dudt(const float r, 
+                      const float u, 
+                      const float dudr, 
+                      const float d2udr2);
 
     /**
      * Calculates the radial velocity of the fluid.
      * @param r: The radius to calculate the radial velocity at.
      * @return The radial velocity of the fluid.
     */
-    float radialVelocity(const float r);
+    inline float radialVelocity(const float r);
 
     /**
      * Draws the drum filter on the image.
@@ -126,5 +136,5 @@ private:
      * @param image: The image to draw the particles on.
      * @param particles: The particles to draw on the image.
     */
-    void drawParticles(cv::Mat& image, const Eigen::MatrixXf& particles);
+    void drawParticles(cv::Mat& image, const Eigen::MatrixXf& particles, const int particle_size);
 };

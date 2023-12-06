@@ -40,6 +40,9 @@ NSsimulator::NSsimulator(float U,
     dr_ = dr;
     dt_ = dt;
 
+    inv_2dr_ = 1.0f / (2 * dr_);
+    inv_dr2_ = 1.0f / (dr_ * dr_);
+
     r_space_ = linearSpace(r_min_, r_max_, dr_);
     t_space_ = linearSpace(0, t_max_, dt_);
 
@@ -67,30 +70,69 @@ NSsimulator::NSsimulator(float U,
 /**
  * Solves the Navier-Stokes equation for the rotating drum.
 */
-void NSsimulator::solveNavierStokes() {
+void NSsimulator::solveNavierStokesEuler() {
     for (int t_step = 0; t_step < t_space_.rows() - 1; t_step++) {
         for (int r_step = 1; r_step < r_space_.rows() - 1; r_step++) {
-            
             const float u = u_theta_(r_step, t_step);
+            const float u_prev_r = u_theta_(r_step - 1, t_step);
+            const float u_next_r = u_theta_(r_step + 1, t_step);
 
-            // dudr = (u(r + dr) - u(r - dr)) / (2 * dr)
-            const float dudr = (u_theta_(r_step + 1, t_step) - u_theta_(r_step - 1, t_step)) / (2*dr_);
+            const float dudr = (u_next_r - u_prev_r) * inv_2dr_;
+            const float d2udr2 = (u_next_r - 2 * u + u_prev_r) * inv_dr2_;
 
-            // d2udr2 = (u(r + dr) - 2 * u(r) + u(r - dr)) / dr^2
-            const float d2udr2 = (u_theta_(r_step + 1, t_step) - 2 * u_theta_(r_step, t_step) + u_theta_(r_step - 1, t_step)) / pow(dr_, 2);
-            
-            // update u(r, t + dt) = u(r, t) + dt * dudt
-            u_theta_(r_step, t_step + 1) = u_theta_(r_step, t_step) + dt_ * dudt(r_space_(r_step), u, dudr, d2udr2);
-
-            // boundary condition u(inf, t) = 0
-            u_theta_(r_space_.rows() - 1, t_step + 1) = 0;
-
-            // boundary condition u(R, t) = omega(t) * R
-            u_theta_(steps_to_R_, t_step + 1) = omega(t_space_(t_step + 1)) * R_;
-
+            u_theta_(r_step, t_step + 1) = u + dt_ * dudt(r_space_(r_step), u, dudr, d2udr2);      
         }
+
+        // boundary conditions
+        u_theta_(r_space_.rows() - 1, t_step + 1) = 0;
+        u_theta_(steps_to_R_, t_step + 1) = omega(t_space_(t_step + 1)) * R_;
+    }
+
+    // check if the solution diverges
+    const float max_u = u_theta_.maxCoeff();
+    const float min_u = u_theta_.minCoeff();
+    if (std::isnan(max_u) || std::isnan(min_u)) {
+        std::cout << "Solution diverged, use a smaller dt." << std::endl;
+        std::exit(0);
     }
 }
+
+
+/**
+ * Solves the Navier-Stokes equation for the rotating drum.
+*/
+void NSsimulator::solveNavierStokesRK4() {
+    for (int t_step = 0; t_step < t_space_.rows() - 1; t_step++) {
+        for (int r_step = 1; r_step < r_space_.rows() - 1; r_step++) {
+            const float u = u_theta_(r_step, t_step);
+            const float u_prev_r = u_theta_(r_step - 1, t_step);
+            const float u_next_r = u_theta_(r_step + 1, t_step);
+
+            const float dudr = (u_next_r - u_prev_r) * inv_2dr_;
+            const float d2udr2 = (u_next_r - 2 * u + u_prev_r) * inv_dr2_;
+
+            const float k1 = dt_ * dudt(r_space_(r_step), u, dudr, d2udr2);
+            const float k2 = dt_ * dudt(r_space_(r_step), u + k1 / 2, dudr, d2udr2);
+            const float k3 = dt_ * dudt(r_space_(r_step), u + k2 / 2, dudr, d2udr2);
+            const float k4 = dt_ * dudt(r_space_(r_step), u + k3, dudr, d2udr2);
+
+            u_theta_(r_step, t_step + 1) = u + (k1 + 2 * k2 + 2 * k3 + k4) / 6;      
+        }
+
+        // boundary conditions
+        u_theta_(r_space_.rows() - 1, t_step + 1) = 0;
+        u_theta_(steps_to_R_, t_step + 1) = omega(t_space_(t_step + 1)) * R_;
+    }
+
+    // check if the solution diverges
+    const float max_u = u_theta_.maxCoeff();
+    const float min_u = u_theta_.minCoeff();
+    if (std::isnan(max_u) || std::isnan(min_u)) {
+        std::cout << "Solution diverged, use a smaller dt." << std::endl;
+        std::exit(0);
+    }
+}
+
 
 /**
  * Simulates particles in the rotating drum.
@@ -148,12 +190,15 @@ void NSsimulator::simulateParticles(std::vector<Eigen::MatrixXf>& particles_over
     }
 }
 
+
 /**
  * Visualizes the particles in the rotating drum.
  * @param particles_over_time: The particles simulated over time.
  * @param fps: The number of frames per second to simulate.
 */
-void NSsimulator::visualizeParticles(const std::vector<Eigen::MatrixXf>& particles_over_time, const int fps) {
+void NSsimulator::visualizeParticles(const std::vector<Eigen::MatrixXf>& particles_over_time, 
+                                     const int fps, 
+                                     const int particle_size) {
     // visualize the particles
     std::vector<cv::Mat> images;
 
@@ -161,14 +206,14 @@ void NSsimulator::visualizeParticles(const std::vector<Eigen::MatrixXf>& particl
 
     // get 30 images per second
     const float time_step_skip = 1.0 / dt_ / static_cast<float>(fps);
-    const int image_size = static_cast<int>((r_max_ - r_min_) / dr_);
+    const int image_size = static_cast<int>(sqrt(2) * (r_max_ - r_min_) / dr_);
 
     for (int t_step = 0; t_step < particles_over_time.size(); t_step++) {
         cv::Mat image(image_size, image_size, CV_8UC3, cv::Scalar(0, 0, 0));
         const Eigen::MatrixXf& particles_this_time = particles_over_time[t_step];
 
         // add the particles
-        drawParticles(image, particles_this_time);
+        drawParticles(image, particles_this_time, particle_size);
 
         // add the drum filter and integrate the angle 
         current_angle += omega(t_step * dt_ * time_step_skip) * dt_ * time_step_skip;
@@ -185,6 +230,7 @@ void NSsimulator::visualizeParticles(const std::vector<Eigen::MatrixXf>& particl
         cv::waitKey(static_cast<int>(1000 / fps));
     }
 }
+
 
 /**
  * Creates a linear space of floats.
@@ -210,7 +256,7 @@ Eigen::MatrixXf NSsimulator::linearSpace(const float start,
  * @param t: The time to calculate the angular velocity at.
  * @return The angular velocity of the drum at time t.
 */
-float NSsimulator::omega(const float t) {
+inline float NSsimulator::omega(const float t) {
     return 2*sin(t);
 }
 
@@ -222,20 +268,23 @@ float NSsimulator::omega(const float t) {
  * @param d2udr2: The second radial derivative of the azimuthal velocity.
  * @return The time derivative of the azimuthal velocity.
 */
-float NSsimulator::dudt(const float r, const float u, const float dudr, const float d2udr2) {
-    const float nu_side = nu_ * (d2udr2 + (1/r) * dudr - u / pow(r, 2));
-    const float other_side = (U_ * R_ / r) * dudr + (U_ * R_ / pow(r, 2)) * u;
-    return nu_side + other_side;
+inline float NSsimulator::dudt(const float r, const float u, const float dudr, const float d2udr2) {
+    const float inv_r = 1.0f / r;
+    const float inv_r2 = inv_r * inv_r;
+
+    return nu_ * (d2udr2 + inv_r * dudr - u * inv_r2) + U_ * R_ * inv_r * dudr + U_ * R_ * inv_r2 * u;
 }
+
 
 /**
  * Calculates the radial velocity of the fluid.
  * @param r: The radius to calculate the radial velocity at.
  * @return The radial velocity of the fluid.
 */
-float NSsimulator::radialVelocity(const float r) {
+inline float NSsimulator::radialVelocity(const float r) {
     return - U_ * R_ / r;
 }
+
 
 /**
  * Draws the drum filter on the image.
@@ -258,12 +307,13 @@ void NSsimulator::drawDrumFilter(cv::Mat& image, const float current_angle) {
     cv::circle(image, center, steps_to_R_, cv::Scalar(75, 75, 75), 2);
 }
 
+
 /**
  * Draws the particles on the image.
  * @param image: The image to draw the particles on.
  * @param particles: The particles to draw on the image.
 */
-void NSsimulator::drawParticles(cv::Mat& image, const Eigen::MatrixXf& particles) {
+void NSsimulator::drawParticles(cv::Mat& image, const Eigen::MatrixXf& particles, const int particle_size) {
     const int image_size = image.rows;
 
     for (int i = 0; i < particles.rows(); i++) {
@@ -279,34 +329,35 @@ void NSsimulator::drawParticles(cv::Mat& image, const Eigen::MatrixXf& particles
         if (r < R_) {
             // The particle is inside the drum filter
             // draw with darker color
-            const int darkness = static_cast<int>(0.5*255.0 * pow(r / R_, 2));
-            cv::circle(image, cv::Point(x_img, y_img), 0, cv::Scalar(darkness, darkness, darkness), -1);
+            const int darkness = static_cast<int>(0.5*255.0 * pow(r / R_, particle_size + 1));
+            cv::circle(image, cv::Point(x_img, y_img), particle_size, cv::Scalar(darkness, darkness, darkness), -1);
         }
         else {
-            cv::circle(image, cv::Point(x_img, y_img), 0, cv::Scalar(255, 255, 255), -1);
+            cv::circle(image, cv::Point(x_img, y_img), particle_size, cv::Scalar(255, 255, 255), -1);
         }
     }
 }
 
 
 int main(int argc, char **argv) {
-    float U = 1.0; 
+    float U = 0.75; 
     float R = 1.5;
-    float nu = 1.0;
-    float r_min = 0.01;
-    float r_max = 10;
+    float nu = 0.8;
+    float r_min = 0.1;
+    float r_max = 5;
     float t_max = 10;
     float dr = 0.01;
     float dt = 0.00001;
     int fps = 30;
     int num_particles = 100000;
+    int particle_size = 0;
 
     NSsimulator simulator(U, R, nu, r_min, r_max, t_max, dr, dt);
 
     std::cout << "Solving Navier Stokes..." << std::endl;
 
     auto start = std::chrono::system_clock::now();
-    simulator.solveNavierStokes();
+    simulator.solveNavierStokesEuler();
     auto end = std::chrono::system_clock::now();
 
     std::chrono::duration<double> elapsed_seconds = end-start;
@@ -319,9 +370,10 @@ int main(int argc, char **argv) {
     auto end2 = std::chrono::system_clock::now();
 
     std::chrono::duration<double> elapsed_seconds2 = end2-start2;
-    std::cout << "Simulated particles in " << elapsed_seconds2.count() << " seconds" << std::endl;
+    std::cout << "Simulated " << num_particles << " particles in " 
+              << elapsed_seconds2.count() << " seconds" << std::endl;
 
     std::cout << "Starting visualization..." << std::endl;
-    simulator.visualizeParticles(particles_over_time, fps);
+    simulator.visualizeParticles(particles_over_time, fps, particle_size);
     return 0;
 }
